@@ -2,32 +2,33 @@ import torch
 import torch.nn as nn
 from torchvision.models import resnet50, ResNet50_Weights
 
-def make_resnet50_1ch(pretrained=True, luminance=False):
-    weights = ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
-    m = resnet50(weights=weights)
-    w_rgb = m.conv1.weight.detach().clone()
-    m.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-    with torch.no_grad():
-        if luminance:
-            coeff = torch.tensor([0.2989, 0.5870, 0.1140]).view(1,3,1,1)
-            m.conv1.weight.copy_((w_rgb * coeff).sum(dim=1, keepdim=True))
-        else:
-            m.conv1.weight.copy_(w_rgb.mean(dim=1, keepdim=True))
+def make_frozen_resnet50_feature_extractor():
+    """
+    Built-in PyTorch pretrained ResNet-50, unchanged conv1=3 channels.
+    Frozen feature extractor:
+      input:  (N,3,H,W)
+      output: (N,2048)
+    """
+    m = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
     m.fc = nn.Identity()
+    m.eval()
+    for p in m.parameters():
+        p.requires_grad = False
     return m
 
-def freeze_resnet_until(model: nn.Module, mode: str):
-    if not mode:
-        return
-    if mode == "layer3":
-        freeze_names = ["conv1", "bn1", "layer1", "layer2"]
-    elif mode == "layer4":
-        freeze_names = ["conv1", "bn1", "layer1", "layer2", "layer3"]
-    elif mode == "all":
-        freeze_names = ["conv1", "bn1", "layer1", "layer2", "layer3", "layer4"]
-    else:
-        raise ValueError(f"Unknown freeze mode: {mode}")
-    for name, module in model.named_children():
-        if name in freeze_names:
-            for p in module.parameters():
-                p.requires_grad = False
+def make_frozen_resnet50_trunk():
+    """
+    Built-in PyTorch pretrained ResNet-50 trunk up to layer4.
+    Unchanged conv1=3 channels, frozen.
+      input:  (N,3,H,W)
+      output: (N,2048,7,7) for 224x224 input
+    """
+    m = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+    trunk = nn.Sequential(
+        m.conv1, m.bn1, m.relu, m.maxpool,
+        m.layer1, m.layer2, m.layer3, m.layer4
+    )
+    trunk.eval()
+    for p in trunk.parameters():
+        p.requires_grad = False
+    return trunk

@@ -1,7 +1,7 @@
 seed: 42
 
 data:
-  input_size: 224
+  input_size: 512
   clip_frames: 600
   raw_fps: 30.0
   normalize: true
@@ -14,9 +14,10 @@ model:
   ff_mult: 4
   max_len: 700
   temporal_downsample: 3
-  use_pretrained_resnet: true
-  freeze_resnet_until: ""
+  use_pretrained_resnet: true      # frozen built-in PyTorch ResNet-50
+  freeze_resnet_until: ""        # ignored; ResNet is fully frozen
   include_temp_path: false
+  use_domain_token: false       # false for RR-only; true when using RR+Temp shared transformer
   unet_base: 32
 
 train:

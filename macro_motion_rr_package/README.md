@@ -14,8 +14,8 @@ RR path:
 NIR 3-ch clip
    -> normalize to [0,1]
    -> optional temporal downsample 30 Hz -> 10 Hz
-   -> grayscale 1-ch
-   -> ResNet-50 with 1-channel conv1
+   -> keep 3-channel NIR/RGB input
+   -> frozen built-in PyTorch pretrained ResNet-50 feature extractor
    -> Linear 2048 -> d_model
    -> shared Transformer with [CLS], [RR_DOMAIN], [COND]
    -> RR head
@@ -78,3 +78,69 @@ python scripts/evaluate_rr.py --metadata data/metadata_split.csv --ckpt runs/rr_
 - dropout: 0.1
 - RR loss: Huber
 - metrics: MAE, RMSE, MAPE, bias, SD error, Pearson r, R2
+
+
+## Frozen pretrained ResNet-50 update
+
+This package version keeps PyTorch's built-in pretrained ResNet-50 unchanged and frozen:
+- `torchvision.models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)`
+- original `conv1` stays 3-channel
+- `fc = Identity()`
+- `eval()`
+- all ResNet parameters have `requires_grad=False`
+
+For RR:
+- NIR/RGB 3-ch -> frozen ResNet-50 unchanged -> Linear(2048->d_model)
+
+For Temp:
+- IRhat 1-ch -> repeat to 3-ch -> frozen ResNet-50 trunk -> face-aware attention pooling -> Linear(2048->d_model)
+
+
+## RR path correction
+
+The RR path now keeps the original 3-channel NIR/RGB clip:
+```text
+NIR/RGB 3-ch clip -> frozen pretrained ResNet-50 -> Linear(2048->512) -> Transformer -> RR
+```
+
+No grayscale conversion and no 1-channel-to-3-channel replication are used in the active RR path.
+
+
+## DOMAIN token flag
+
+The package now has:
+
+```yaml
+model:
+  use_domain_token: false
+```
+
+For current RR-only training, keep it `false`.
+
+RR-only Transformer input becomes:
+
+```text
+[CLS] [COND] z1 z2 ... zT
+```
+
+With 600 raw frames and `temporal_downsample=3`, `T=200`, so the Transformer input is:
+
+```text
+(B, 202, 512)
+```
+
+If you later enable the Temp path and want a shared RR+Temp Transformer, set:
+
+```yaml
+model:
+  include_temp_path: true
+  use_domain_token: true
+```
+
+Then the sequence becomes:
+
+```text
+[CLS] [DOMAIN] [COND] z1 z2 ... zT
+```
+
+with shape `(B, T+3, 512)`.

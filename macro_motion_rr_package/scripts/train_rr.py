@@ -68,7 +68,8 @@ def main():
         temporal_downsample=cfg["model"]["temporal_downsample"],
         pretrained_resnet=cfg["model"]["use_pretrained_resnet"],
         freeze_resnet_until=cfg["model"]["freeze_resnet_until"],
-        include_temp_path=include_temp, unet_base=cfg["model"]["unet_base"]
+        include_temp_path=include_temp, unet_base=cfg["model"]["unet_base"],
+        use_domain_token=cfg["model"].get("use_domain_token", False)
     ).to(device)
 
     criterion = UncertaintyWeightedRRTempLoss(cfg["train"]["rr_loss"], cfg["train"]["huber_delta"]).to(device)

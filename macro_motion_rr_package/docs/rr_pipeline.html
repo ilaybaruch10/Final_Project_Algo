@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RR path pipeline — macro_motion</title>
+<style>
+:root{
+  --bg:#ffffff; --bg2:#f6f5f1; --bg3:#efede6;
+  --text:#26251f; --text2:#5f5e5a; --text3:#8d8c84;
+  --bd:rgba(0,0,0,.14); --bd2:rgba(0,0,0,.26); --bd3:rgba(0,0,0,.38);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#1f1e1b; --bg2:#2a2925; --bg3:#33312c;
+    --text:#ecebe3; --text2:#b6b4ab; --text3:#86857d;
+    --bd:rgba(255,255,255,.14); --bd2:rgba(255,255,255,.26); --bd3:rgba(255,255,255,.4);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6}
+.page{max-width:760px;margin:0 auto;padding:32px 20px 56px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+.sub{font-size:13px;color:var(--text2);margin:0 0 22px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--bd2);background:var(--bg);color:var(--text);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.btn:hover{background:var(--bg2)}
+.pill{border:1px solid var(--bd);background:transparent;color:var(--text2);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+.pill.on{border-color:var(--bd3);color:var(--text);background:var(--bg2)}
+.step{margin-left:auto;font-size:12px;color:var(--text3)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.swatch{width:10px;height:10px;border-radius:3px;display:inline-block}
+.pipeline{position:relative}
+.spine{position:absolute;left:15px;top:18px;bottom:60px;width:2px;background:var(--bd)}
+.spine-fill{position:absolute;left:15px;top:18px;width:2px;height:0;background:var(--text3);transition:height .45s ease}
+.pulse{position:absolute;left:9px;top:18px;width:14px;height:14px;border-radius:50%;background:var(--text);transition:top .45s ease;box-shadow:0 0 0 4px var(--bg);z-index:3}
+.stage{position:relative;display:flex;gap:14px;padding:4px 0 18px 0}
+.rail{width:30px;flex:0 0 30px;display:flex;justify-content:center;padding-top:4px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--bg);border:2px solid var(--accent);transition:transform .25s ease;z-index:2}
+.body{flex:1;border:1px solid var(--bd);border-left:3px solid var(--accent);border-radius:8px;padding:10px 14px;background:var(--bg);transition:background .25s ease,box-shadow .25s ease,opacity .25s ease;opacity:.62}
+.stage.active .body{opacity:1;background:var(--bg2);box-shadow:0 1px 0 var(--bd2)}
+.stage.active .dot{transform:scale(1.4)}
+.stage.done .body{opacity:.92}
+.row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sname{font-size:15px;color:var(--text);font-weight:500}
+.kind{font-size:11px;color:var(--accent);font-weight:500}
+.ref{font-size:12px;color:var(--text2);font-family:var(--mono);margin:3px 0 8px}
+.shapes{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:12px;color:var(--text2);background:var(--bg3);border-radius:6px;padding:3px 8px}
+.chip.out{color:var(--text)}
+.stage.active .chip.out{animation:pop .4s ease}
+@keyframes pop{0%{transform:scale(.9);opacity:.3}100%{transform:scale(1);opacity:1}}
+.sep{color:var(--text3)}
+.note{font-size:12px;color:var(--text3);margin-top:7px}
+.readout{margin-left:44px;margin-top:4px;display:flex;align-items:baseline;gap:10px;border:1px solid var(--bd);border-radius:12px;padding:12px 18px;background:var(--bg)}
+.readout.live{border-color:#1D9E75;background:var(--bg2)}
+.rlabel{font-size:13px;color:var(--text2)}
+.rval{font-size:26px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums}
+.runit{font-size:14px;color:var(--text2)}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>RR path pipeline</h1>
+<p class="sub">macro_motion_rr_package · respiratory-rate branch · batch size 2 · 600 frames @ 30 Hz → 200 @ 10 Hz · 512×512 · d_model 512</p>
+<h2 class="sr-only">Animated walkthrough of the respiratory-rate path: a NIR clip flows through batching, temporal downsampling, a frozen ResNet-50, a linear projection, token assembly, a shared transformer encoder, and an RR head that outputs breaths per minute.</h2>
+<div class="bar">
+  <button class="btn" id="play"><span id="playicon">&#10073;&#10073;</span><span id="playtxt">pause</span></button>
+  <button class="btn" id="restart" aria-label="restart">&#8635;</button>
+  <button class="pill" data-spd="1500">0.5&times;</button>
+  <button class="pill on" data-spd="1000">1&times;</button>
+  <button class="pill" data-spd="550">2&times;</button>
+  <span class="step" id="step">step 1 / 8</span>
+</div>
+<div class="legend">
+  <span><span class="swatch" style="background:#888780"></span>data</span>
+  <span><span class="swatch" style="background:#BA7517"></span>frozen · pretrained</span>
+  <span><span class="swatch" style="background:#7F77DD"></span>trained</span>
+  <span><span class="swatch" style="background:#1D9E75"></span>output</span>
+</div>
+<div class="pipeline" id="pipeline">
+  <div class="spine"></div>
+  <div class="spine-fill" id="fill"></div>
+  <div class="pulse" id="pulse"></div>
+
+  <div class="stage" data-kind="data" style="--accent:#888780">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">NIR clip in</span><span class="kind">input</span></div>
+      <div class="ref">dataset.py · MacroMotionDataset.__getitem__</div>
+      <div class="shapes"><span class="chip">load · normalize [0,1] · resize 512</span><span class="sep">&rarr;</span><span class="chip out">(600, 3, 512, 512)</span></div>
+      <div class="note">20 s clip, padded/cropped to 600 frames, 3-channel</div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="data" style="--accent:#888780">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Batch</span><span class="kind">data</span></div>
+      <div class="ref">datamodule.py · make_loaders</div>
+      <div class="shapes"><span class="chip">DataLoader · batch_size 2</span><span class="sep">&rarr;</span><span class="chip out">(2, 600, 3, 512, 512)</span></div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="data" style="--accent:#888780">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Temporal downsample</span><span class="kind">data</span></div>
+      <div class="ref">macro_motion_model.py · _downsample_time</div>
+      <div class="shapes"><span class="chip">clip[:, ::3] · 30 → 10 Hz</span><span class="sep">&rarr;</span><span class="chip out">(2, 200, 3, 512, 512)</span></div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="frozen" style="--accent:#BA7517">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Frozen ResNet-50</span><span class="kind">frozen · no_grad</span></div>
+      <div class="ref">resnet1ch.py · make_frozen_resnet50_feature_extractor</div>
+      <div class="shapes"><span class="chip">(400, 3, 512, 512)</span><span class="sep">&rarr;</span><span class="chip out">(400, 2048)</span></div>
+      <div class="note">per-frame · IMAGENET1K_V2 · fc=Identity · eval, requires_grad=False</div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="trained" style="--accent:#7F77DD">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Linear projection</span><span class="kind">trained</span></div>
+      <div class="ref">frame_encoders.py · FrozenResNet50FrameEncoder.proj</div>
+      <div class="shapes"><span class="chip">Linear 2048 → 512</span><span class="sep">&rarr;</span><span class="chip out">(2, 200, 512)</span></div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="trained" style="--accent:#7F77DD">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Token assembly</span><span class="kind">trained</span></div>
+      <div class="ref">transformer.py · SharedMacroTransformer.make_seq</div>
+      <div class="shapes"><span class="chip">[CLS] [COND] + 200 tokens + pos</span><span class="sep">&rarr;</span><span class="chip out">(2, 202, 512)</span></div>
+      <div class="note">use_domain_token=false → 2 prepended tokens (RR-only)</div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="trained" style="--accent:#7F77DD">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Transformer encoder</span><span class="kind">trained</span></div>
+      <div class="ref">transformer.py · forward_once</div>
+      <div class="shapes"><span class="chip">6 layers · 8 heads · pre-norm GELU</span><span class="sep">&rarr;</span><span class="chip out">CLS → (2, 512)</span></div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="output" style="--accent:#1D9E75">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">RR head</span><span class="kind">output</span></div>
+      <div class="ref">macro_motion_model.py · rr_head</div>
+      <div class="shapes"><span class="chip">LayerNorm · Linear 512 → 1</span><span class="sep">&rarr;</span><span class="chip out">(2,) bpm</span></div>
+    </div>
+  </div>
+
+  <div class="readout" id="readout">
+    <span class="rlabel">estimated RR</span>
+    <span class="rval" id="rval">—</span>
+    <span class="runit">breaths / min</span>
+  </div>
+</div>
+</div>
+<script>
+(function(){
+  var pipe=document.getElementById('pipeline');
+  var stages=[].slice.call(pipe.querySelectorAll('.stage'));
+  var pulse=document.getElementById('pulse');
+  var fill=document.getElementById('fill');
+  var stepEl=document.getElementById('step');
+  var readout=document.getElementById('readout');
+  var rval=document.getElementById('rval');
+  var i=0, speed=1000, timer=null, playing=true, countTimer=null;
+  function dotY(stage){
+    var d=stage.querySelector('.dot');
+    var pr=pipe.getBoundingClientRect(), dr=d.getBoundingClientRect();
+    return dr.top-pr.top+dr.height/2;
+  }
+  function runReadout(){
+    clearInterval(countTimer);
+    readout.classList.add('live');
+    var target=41.3, v=0;
+    countTimer=setInterval(function(){
+      v+=target/14;
+      if(v>=target){v=target;clearInterval(countTimer);}
+      rval.textContent=v.toFixed(1);
+    },40);
+  }
+  function activate(n){
+    i=n;
+    stages.forEach(function(s,j){s.classList.toggle('active',j===n);s.classList.toggle('done',j<n);});
+    var y=dotY(stages[n]);
+    pulse.style.top=(y-7)+'px';
+    fill.style.height=y+'px';
+    stepEl.textContent='step '+(n+1)+' / '+stages.length;
+    if(n===stages.length-1){runReadout();}
+    else{readout.classList.remove('live');rval.textContent='—';clearInterval(countTimer);}
+  }
+  function tick(){activate((i+1)%stages.length);}
+  function run(){clearInterval(timer);if(playing)timer=setInterval(tick,speed);}
+  document.getElementById('play').addEventListener('click',function(){
+    playing=!playing;
+    document.getElementById('playicon').innerHTML=playing?'&#10073;&#10073;':'&#9654;';
+    document.getElementById('playtxt').textContent=playing?'pause':'play';
+    run();
+  });
+  document.getElementById('restart').addEventListener('click',function(){activate(0);run();});
+  [].slice.call(document.querySelectorAll('.pill')).forEach(function(p){
+    p.addEventListener('click',function(){
+      [].slice.call(document.querySelectorAll('.pill')).forEach(function(x){x.classList.remove('on');});
+      this.classList.add('on');speed=+this.dataset.spd;run();
+    });
+  });
+  setTimeout(function(){activate(0);run();},60);
+})();
+</script>
+</body>
+</html>
