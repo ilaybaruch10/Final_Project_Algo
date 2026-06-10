@@ -21,7 +21,7 @@ def make_frozen_resnet50_trunk():
     Built-in PyTorch pretrained ResNet-50 trunk up to layer4.
     Unchanged conv1=3 channels, frozen.
       input:  (N,3,H,W)
-      output: (N,2048,7,7) for 224x224 input
+      output: (N,2048,16,16) for 512x512 input
     """
     m = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
     trunk = nn.Sequential(

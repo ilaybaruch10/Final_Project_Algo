@@ -56,6 +56,10 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
 @keyframes pop{0%{transform:scale(.9);opacity:.3}100%{transform:scale(1);opacity:1}}
 .sep{color:var(--text3)}
 .note{font-size:12px;color:var(--text3);margin-top:7px}
+.spark{margin-top:9px;width:100%;max-width:260px;height:38px;display:block}
+.spark polyline{fill:none;stroke:#7F77DD;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.stage.active .spark polyline{stroke-dasharray:600;stroke-dashoffset:600;animation:draw 1s ease forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
 .readout{margin-left:44px;margin-top:4px;display:flex;align-items:baseline;gap:10px;border:1px solid var(--bd);border-radius:12px;padding:12px 18px;background:var(--bg)}
 .readout.live{border-color:#1D9E75;background:var(--bg2)}
 .rlabel{font-size:13px;color:var(--text2)}
@@ -66,15 +70,15 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
 <body>
 <div class="page">
 <h1>RR path pipeline</h1>
-<p class="sub">macro_motion_rr_package · respiratory-rate branch · batch size 2 · 600 frames @ 30 Hz → 200 @ 10 Hz · 512×512 · d_model 512</p>
-<h2 class="sr-only">Animated walkthrough of the respiratory-rate path: a NIR clip flows through batching, temporal downsampling, a frozen ResNet-50, a linear projection, token assembly, a shared transformer encoder, and an RR head that outputs breaths per minute.</h2>
+<p class="sub">macro_motion_rr_package · respiratory-rate branch · per-frame RR regression · batch size 2 · 600 frames @ 30 Hz → 200 @ 10 Hz · 512×512 · d_model 512</p>
+<h2 class="sr-only">Animated walkthrough of the respiratory-rate path: a NIR clip flows through batching, temporal downsampling, a frozen ResNet-50, a linear projection, token assembly, a shared transformer encoder, a per-frame RR head producing a 200-step sequence, and a temporal mean that yields clip-level breaths per minute.</h2>
 <div class="bar">
   <button class="btn" id="play"><span id="playicon">&#10073;&#10073;</span><span id="playtxt">pause</span></button>
   <button class="btn" id="restart" aria-label="restart">&#8635;</button>
   <button class="pill" data-spd="1500">0.5&times;</button>
   <button class="pill on" data-spd="1000">1&times;</button>
   <button class="pill" data-spd="550">2&times;</button>
-  <span class="step" id="step">step 1 / 8</span>
+  <span class="step" id="step">step 1 / 9</span>
 </div>
 <div class="legend">
   <span><span class="swatch" style="background:#888780"></span>data</span>
@@ -93,7 +97,7 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
       <div class="row1"><span class="sname">NIR clip in</span><span class="kind">input</span></div>
       <div class="ref">dataset.py · MacroMotionDataset.__getitem__</div>
       <div class="shapes"><span class="chip">load · normalize [0,1] · resize 512</span><span class="sep">&rarr;</span><span class="chip out">(600, 3, 512, 512)</span></div>
-      <div class="note">20 s clip, padded/cropped to 600 frames, 3-channel</div>
+      <div class="note">20 s clip, padded/cropped to 600 frames, 3-channel · target rr_seq (600,)</div>
     </div>
   </div>
 
@@ -112,6 +116,7 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
       <div class="row1"><span class="sname">Temporal downsample</span><span class="kind">data</span></div>
       <div class="ref">macro_motion_model.py · _downsample_time</div>
       <div class="shapes"><span class="chip">clip[:, ::3] · 30 → 10 Hz</span><span class="sep">&rarr;</span><span class="chip out">(2, 200, 3, 512, 512)</span></div>
+      <div class="note">rr_seq target downsampled ×3 to (2, 200) to match</div>
     </div>
   </div>
 
@@ -148,22 +153,35 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
     <div class="rail"><span class="dot"></span></div>
     <div class="body">
       <div class="row1"><span class="sname">Transformer encoder</span><span class="kind">trained</span></div>
-      <div class="ref">transformer.py · forward_once</div>
-      <div class="shapes"><span class="chip">6 layers · 8 heads · pre-norm GELU</span><span class="sep">&rarr;</span><span class="chip out">CLS → (2, 512)</span></div>
+      <div class="ref">transformer.py · forward_tokens</div>
+      <div class="shapes"><span class="chip">6 layers · 8 heads · pre-norm GELU</span><span class="sep">&rarr;</span><span class="chip out">(2, 202, 512)</span></div>
+      <div class="note">full sequence returned — CLS is not the RR readout</div>
+    </div>
+  </div>
+
+  <div class="stage" data-kind="trained" style="--accent:#7F77DD">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sname">Per-frame RR head</span><span class="kind">trained</span></div>
+      <div class="ref">macro_motion_model.py · rr_head (frame tokens)</div>
+      <div class="shapes"><span class="chip">drop CLS+COND → (2, 200, 512)</span><span class="sep">&rarr;</span><span class="chip out">(2, 200) bpm</span></div>
+      <div class="note">LayerNorm · Linear 512 → 1 per frame → rr_pred_seq</div>
+      <svg class="spark" id="spark" viewBox="0 0 260 38" preserveAspectRatio="none" aria-hidden="true"><polyline id="sparkline" points=""></polyline></svg>
     </div>
   </div>
 
   <div class="stage" data-kind="output" style="--accent:#1D9E75">
     <div class="rail"><span class="dot"></span></div>
     <div class="body">
-      <div class="row1"><span class="sname">RR head</span><span class="kind">output</span></div>
-      <div class="ref">macro_motion_model.py · rr_head</div>
-      <div class="shapes"><span class="chip">LayerNorm · Linear 512 → 1</span><span class="sep">&rarr;</span><span class="chip out">(2,) bpm</span></div>
+      <div class="row1"><span class="sname">Temporal mean</span><span class="kind">output</span></div>
+      <div class="ref">macro_motion_model.py · rr_pred_seq.mean(dim=1)</div>
+      <div class="shapes"><span class="chip">mean over 200 frames</span><span class="sep">&rarr;</span><span class="chip out">(2,) bpm</span></div>
+      <div class="note">clip-level RR · training also adds 0.05 · temporal-smoothness on rr_pred_seq</div>
     </div>
   </div>
 
   <div class="readout" id="readout">
-    <span class="rlabel">estimated RR</span>
+    <span class="rlabel">estimated RR (clip mean)</span>
     <span class="rval" id="rval">—</span>
     <span class="runit">breaths / min</span>
   </div>
@@ -178,7 +196,17 @@ h1{font-size:22px;font-weight:500;margin:0 0 4px}
   var stepEl=document.getElementById('step');
   var readout=document.getElementById('readout');
   var rval=document.getElementById('rval');
+  var sparkline=document.getElementById('sparkline');
   var i=0, speed=1000, timer=null, playing=true, countTimer=null;
+  (function buildSpark(){
+    var pts=[], n=60, mean=20;
+    for(var k=0;k<n;k++){
+      var x=k/(n-1)*260;
+      var y=19 - (Math.sin(k*0.6)*5 + Math.sin(k*0.21)*3 + (Math.random()-0.5)*2);
+      pts.push(x.toFixed(1)+','+y.toFixed(1));
+    }
+    sparkline.setAttribute('points', pts.join(' '));
+  })();
   function dotY(stage){
     var d=stage.querySelector('.dot');
     var pr=pipe.getBoundingClientRect(), dr=d.getBoundingClientRect();

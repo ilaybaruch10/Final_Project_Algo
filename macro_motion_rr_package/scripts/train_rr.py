@@ -13,30 +13,34 @@ def str2bool(x):
     if isinstance(x, bool): return x
     return str(x).lower() in ["1", "true", "yes", "y"]
 
+def downsample_rr_seq(rr_seq_raw, temporal_downsample):
+    if temporal_downsample is None or temporal_downsample <= 1:
+        return rr_seq_raw
+    return rr_seq_raw[:, ::temporal_downsample]
+
 @torch.no_grad()
-def evaluate(model, loader, device, include_temp, criterion, w_blanket, w_exposed):
+def evaluate(model, loader, device, include_temp, criterion, cfg):
     model.eval()
-    ys, ps = [], []
+    ys_frame, ps_frame = [], []
     total_loss, n = 0.0, 0
+    ds = cfg["model"]["temporal_downsample"]
+
     for batch in loader:
         clip = batch["clip"].to(device)
-        rr = batch["rr"].to(device)
+        rr_seq = downsample_rr_seq(batch["rr_seq"].to(device), ds)
         cond_id = batch["cond_id"].to(device)
         face_mask = batch.get("face_mask", None)
         if face_mask is not None: face_mask = face_mask.to(device)
+
         preds = model(clip, cond_id, face_mask=face_mask, unet_no_grad=True)
-        if include_temp:
-            temp = batch["temp"].to(device)
-            temp_valid = batch["temp_valid"].to(device)
-            w_temp = torch.where(cond_id == 1, torch.full_like(temp, w_blanket), torch.full_like(temp, w_exposed))
-            loss, _ = criterion(preds, rr, temp=temp, temp_valid=temp_valid, w_temp=w_temp)
-        else:
-            loss, _ = criterion(preds, rr)
+        loss, _ = criterion(preds, rr_seq)
+
         total_loss += loss.item() * clip.size(0); n += clip.size(0)
-        ys.extend(rr.detach().cpu().numpy().tolist())
-        ps.extend(preds["rr_pred"].detach().cpu().numpy().tolist())
-    m = compute_regression_metrics(ys, ps); m["loss"] = total_loss / max(n,1)
-    return m
+        ys_frame.extend(rr_seq.detach().cpu().reshape(-1).numpy().tolist())
+        ps_frame.extend(preds["rr_pred_seq"].detach().cpu().reshape(-1).numpy().tolist())
+
+    metrics = compute_regression_metrics(ys_frame, ps_frame)
+    return {f"frame_{k}": v for k, v in metrics.items()} | {"loss": total_loss / max(n,1)}
 
 def main():
     p = argparse.ArgumentParser()
@@ -72,52 +76,51 @@ def main():
         use_domain_token=cfg["model"].get("use_domain_token", False)
     ).to(device)
 
-    criterion = UncertaintyWeightedRRTempLoss(cfg["train"]["rr_loss"], cfg["train"]["huber_delta"]).to(device)
+    criterion = UncertaintyWeightedRRTempLoss(
+        cfg["train"]["rr_loss"],
+        cfg["train"]["huber_delta"],
+        cfg["train"].get("rr_smooth_w", 0.05)
+    ).to(device)
+
     params = list(model.parameters()) + list(criterion.parameters())
     opt = torch.optim.AdamW(params, lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
     scaler = GradScaler(enabled=bool(cfg["train"]["amp"]))
     best_mae = float("inf")
+    ds = cfg["model"]["temporal_downsample"]
 
     for epoch in range(1, cfg["train"]["epochs"]+1):
         model.train()
         pbar = tqdm(train_loader, desc=f"epoch {epoch}")
         for batch in pbar:
             clip = batch["clip"].to(device)
-            rr = batch["rr"].to(device)
+            rr_seq = downsample_rr_seq(batch["rr_seq"].to(device), ds)
             cond_id = batch["cond_id"].to(device)
             face_mask = batch.get("face_mask", None)
             if face_mask is not None: face_mask = face_mask.to(device)
+
             opt.zero_grad(set_to_none=True)
             with autocast(enabled=bool(cfg["train"]["amp"])):
                 preds = model(clip, cond_id, face_mask=face_mask, unet_no_grad=True)
-                if include_temp:
-                    temp = batch["temp"].to(device)
-                    temp_valid = batch["temp_valid"].to(device)
-                    w_temp = torch.where(cond_id == 1,
-                                         torch.full_like(temp, cfg["train"]["temp_loss_weight_blanket"]),
-                                         torch.full_like(temp, cfg["train"]["temp_loss_weight_exposed"]))
-                    loss, _ = criterion(preds, rr, temp=temp, temp_valid=temp_valid, w_temp=w_temp)
-                else:
-                    loss, _ = criterion(preds, rr)
+                loss, terms = criterion(preds, rr_seq)
+
             scaler.scale(loss).backward()
             if cfg["train"]["grad_clip"]:
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(params, cfg["train"]["grad_clip"])
             scaler.step(opt); scaler.update()
-            pbar.set_postfix(loss=float(loss.detach().cpu()))
+            pbar.set_postfix(loss=float(loss.detach().cpu()), rr=float(terms["rr_loss"].cpu()))
 
-        val = evaluate(model, val_loader, device, include_temp, criterion,
-                       cfg["train"]["temp_loss_weight_blanket"], cfg["train"]["temp_loss_weight_exposed"])
+        val = evaluate(model, val_loader, device, include_temp, criterion, cfg)
         print("val", val)
         with open(out_dir / "val_log.jsonl", "a") as f:
-            f.write(json.dumps({"epoch": epoch, **val}) + "\n")
+            f.write(json.dumps({"epoch": epoch, **val}) + "\\n")
         ckpt = {"model": model.state_dict(), "criterion": criterion.state_dict(), "cfg": cfg, "epoch": epoch, "val_metrics": val}
-        if val["MAE"] < best_mae:
-            best_mae = val["MAE"]
+        if val["frame_MAE"] < best_mae:
+            best_mae = val["frame_MAE"]
             torch.save(ckpt, out_dir / "best.pt")
         if epoch % cfg["train"]["save_every"] == 0:
             torch.save(ckpt, out_dir / f"epoch_{epoch}.pt")
-    print("Best val MAE:", best_mae)
+    print("Best val frame MAE:", best_mae)
 
 if __name__ == "__main__":
     main()

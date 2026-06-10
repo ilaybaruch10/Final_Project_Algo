@@ -21,11 +21,6 @@ class FrozenResNet50FrameEncoder(nn.Module):
         self.backbone = make_frozen_resnet50_feature_extractor()
         self.proj = nn.Linear(2048, d_model)
 
-    def train(self, mode=True):
-        super().train(mode)
-        self.backbone.eval()  # frozen backbone stays in eval so BN stats never drift
-        return self
-
     @staticmethod
     def to_3ch(x):
         # RR path should already be 3-channel and passes through unchanged.
@@ -63,11 +58,6 @@ class FrozenResNet50SpatialBackbone(nn.Module):
         super().__init__()
         self.trunk = make_frozen_resnet50_trunk()
         self.out_channels = 2048
-
-    def train(self, mode=True):
-        super().train(mode)
-        self.trunk.eval()  # frozen trunk stays in eval so BN stats never drift
-        return self
 
     @staticmethod
     def to_3ch(x):

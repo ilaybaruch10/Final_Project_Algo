@@ -20,51 +20,29 @@ class SharedMacroTransformer(nn.Module):
             norm_first=True,
         )
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=depth)
-
         self.use_domain_token = use_domain_token
-
-        # Learnable special tokens / embeddings
         self.cls = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
-
-        # Only used when use_domain_token=True.
-        # 0 = RR, 1 = TEMP
         self.domain_embed = nn.Embedding(2, d_model)
-
-        # Condition embedding.
-        # IMPORTANT: if you use exposed/partial/heavy, change 2 -> 3 here.
-        # 0 = exposed, 1 = blanket by default.
         self.cond_embed = nn.Embedding(2, d_model)
-
         self.pos_embed = nn.Parameter(torch.zeros(1, max_len, d_model))
 
     def make_seq(self, z, domain_id: int, cond_id):
-        """
-        z: (B,T,d_model)
-        cond_id: (B,)
-
-        If use_domain_token=False:
-            sequence = [CLS] [COND] z1...zT
-            shape = (B,T+2,d_model)
-
-        If use_domain_token=True:
-            sequence = [CLS] [DOMAIN] [COND] z1...zT
-            shape = (B,T+3,d_model)
-        """
         B, T, D = z.shape
-
         cls = self.cls.expand(B, 1, D)
         cond = self.cond_embed(cond_id.view(B, 1).to(z.device))
-
         if self.use_domain_token:
             dom_ids = torch.full((B, 1), int(domain_id), device=z.device, dtype=torch.long)
             dom = self.domain_embed(dom_ids)
-            seq = torch.cat([cls, dom, cond, z], dim=1)      # (B,T+3,D)
+            seq = torch.cat([cls, dom, cond, z], dim=1)  # (B,T+3,D)
         else:
-            seq = torch.cat([cls, cond, z], dim=1)           # (B,T+2,D)
+            seq = torch.cat([cls, cond, z], dim=1)       # (B,T+2,D)
+        return seq + self.pos_embed[:, :seq.shape[1], :]
 
-        seq = seq + self.pos_embed[:, :seq.shape[1], :]
-        return seq
+    def frame_start_index(self):
+        return 3 if self.use_domain_token else 2
+
+    def forward_tokens(self, z, domain_id: int, cond_id):
+        return self.encoder(self.make_seq(z, domain_id, cond_id))
 
     def forward_once(self, z, domain_id: int, cond_id):
-        out = self.encoder(self.make_seq(z, domain_id, cond_id))
-        return out[:, 0, :]  # CLS
+        return self.forward_tokens(z, domain_id, cond_id)[:, 0, :]

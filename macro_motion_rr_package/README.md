@@ -144,3 +144,55 @@ Then the sequence becomes:
 ```
 
 with shape `(B, T+3, 512)`.
+
+
+## Dense per-frame RR output update
+
+The model now supports dense RR prediction.
+
+Current RR-only output:
+```text
+Input:              (B, 600, 3, 512, 512)
+After downsample:   (B, 200, 3, 512, 512)
+Frame tokens:       (B, 200, 512)
+Transformer output: (B, 202, 512)   # [CLS][COND] + 200 frame tokens
+RR output sequence: (B, 200)
+RR scalar output:   mean(RR sequence) -> (B,)
+```
+
+Use dense labels with:
+
+```csv
+clip_path,rr_path,subject_id,cond
+data/clips/clip_001.npy,data/rr/clip_001_rr.npy,baby_001,exposed
+```
+
+`rr_path` may be `.npy`, `.npz`, `.csv`, or `.txt`.
+
+Alternative:
+
+```csv
+clip_path,rr_seq,subject_id,cond
+data/clips/clip_001.npy,"42;42;43;43;...",baby_001,exposed
+```
+
+Backward compatibility:
+
+```csv
+clip_path,rr_bpm,subject_id,cond
+data/clips/clip_001.npy,42.0,baby_001,exposed
+```
+
+In scalar mode, RR is repeated across all frames.
+
+Training loss:
+```text
+Huber(rr_pred_seq, rr_true_seq) + rr_smooth_w * |RR_t - RR_{t-1}|
+```
+
+Evaluation outputs:
+```text
+predictions_framewise_test.csv
+predictions_clipmean_test.csv
+metrics_test.json
+```

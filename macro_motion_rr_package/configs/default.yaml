@@ -30,6 +30,7 @@ train:
   grad_clip: 1.0
   rr_loss: huber
   huber_delta: 2.0
+  rr_smooth_w: 0.05
   temp_loss_weight_blanket: 0.3
   temp_loss_weight_exposed: 1.0
   save_every: 10

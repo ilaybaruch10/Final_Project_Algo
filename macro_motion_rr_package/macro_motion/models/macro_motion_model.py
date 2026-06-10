@@ -60,10 +60,17 @@ class MacroMotionModel(nn.Module):
         # Keep all 3 channels and feed directly to frozen pretrained ResNet-50.
         x_rr = self._downsample_time(clip)           # (B,T,3,H,W)
         z_rr = self.rr_encoder(x_rr)                 # (B,T,d_model)
-        h_rr = self.transformer.forward_once(
+        rr_tokens = self.transformer.forward_tokens(
             z_rr, domain_id=SharedMacroTransformer.DOMAIN_RR, cond_id=cond_id
         )
-        out = {"rr_pred": self.rr_head(h_rr).squeeze(-1)}
+        frame_start = self.transformer.frame_start_index()
+        h_rr_frames = rr_tokens[:, frame_start:, :]              # (B,T_model,d_model)
+        rr_pred_seq = self.rr_head(h_rr_frames).squeeze(-1)      # (B,T_model)
+
+        out = {
+            "rr_pred_seq": rr_pred_seq,
+            "rr_pred": rr_pred_seq.mean(dim=1),                  # clip-level compatibility
+        }
 
         # Optional Temp path
         if self.include_temp_path:
