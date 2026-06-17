@@ -13,11 +13,11 @@ class MacroMotionModel(nn.Module):
         super().__init__()
         self.temporal_downsample = temporal_downsample
         self.include_temp_path = include_temp_path
-        self.rr_encoder = FrozenResNet50FrameEncoder(d_model)
+        self.rr_encoder = FrozenResNet50FrameEncoder(d_model, pretrained=pretrained_resnet)
 
         if include_temp_path:
             self.unet = UNetNIR2IR(in_ch=3, out_ch=1, base=unet_base)
-            self.temp_encoder = FaceAwareFrozenResNet50Encoder(d_model)
+            self.temp_encoder = FaceAwareFrozenResNet50Encoder(d_model, pretrained=pretrained_resnet)
             self.temp_head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, 1))
         else:
             self.unet = None

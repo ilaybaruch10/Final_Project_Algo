@@ -16,9 +16,9 @@ class FrozenResNet50FrameEncoder(nn.Module):
     Output:
       z: (B,T,d_model)
     """
-    def __init__(self, d_model=512):
+    def __init__(self, d_model=512, pretrained=True):
         super().__init__()
-        self.backbone = make_frozen_resnet50_feature_extractor()
+        self.backbone = make_frozen_resnet50_feature_extractor(pretrained=pretrained)
         self.proj = nn.Linear(2048, d_model)
 
     @staticmethod
@@ -54,9 +54,9 @@ class FrozenResNet50SpatialBackbone(nn.Module):
     Output:
       fmap: (N,2048,7,7)
     """
-    def __init__(self):
+    def __init__(self, pretrained=True):
         super().__init__()
-        self.trunk = make_frozen_resnet50_trunk()
+        self.trunk = make_frozen_resnet50_trunk(pretrained=pretrained)
         self.out_channels = 2048
 
     @staticmethod
@@ -86,9 +86,9 @@ class FaceAwareFrozenResNet50Encoder(nn.Module):
     Output:
       z: (B,T,d_model)
     """
-    def __init__(self, d_model=512):
+    def __init__(self, d_model=512, pretrained=True):
         super().__init__()
-        self.backbone = FrozenResNet50SpatialBackbone()
+        self.backbone = FrozenResNet50SpatialBackbone(pretrained=pretrained)
         self.attn = nn.Conv2d(2048, 1, 1)
         self.softplus = nn.Softplus()
         self.proj = nn.Linear(2048, d_model)
