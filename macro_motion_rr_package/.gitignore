@@ -4,6 +4,9 @@ venv/
 __pycache__/
 *.pyc
 
+# pytest
+.pytest_cache/
+
 # Training outputs / checkpoints (large; regenerate, don't commit)
 runs/
 *.pt
